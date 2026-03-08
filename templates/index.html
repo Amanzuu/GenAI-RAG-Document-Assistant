@@ -3,38 +3,52 @@
 
 <head>
 <title>GenAI RAG Assistant</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+<script>
+function toggleTheme(){
+    document.body.classList.toggle("dark");
+}
+</script>
+
 </head>
 
 <body>
 
-<h2>Upload PDF</h2>
+<button class="theme-toggle" onclick="toggleTheme()">🌙 Toggle Mode</button>
+
+<div class="container">
+
+<h1>GenAI RAG Assistant 🤖</h1>
+
+<div class="card upload-card">
+<h3>Upload Document</h3>
 
 <form method="POST" enctype="multipart/form-data">
 <input type="file" name="document">
 <button type="submit">Upload</button>
 </form>
+</div>
 
-{% if message %}
-<p>{{ message }}</p>
-{% endif %}
+<div class="card chat-card">
 
-{% if current_filename %}
-<p>Currently indexed PDF: <strong>{{ current_filename }}</strong></p>
-{% endif %}
-
-<hr>
-
-<h2>Ask Question</h2>
+<h3>Ask Question</h3>
 
 <form method="POST">
-<input type="text" name="question" placeholder="Ask question">
+<input type="text" name="question" placeholder="Ask something about the document..." required>
 <button type="submit">Ask</button>
 </form>
 
 {% if answer %}
-<h3>Answer:</h3>
+<div class="answer-box">
+<strong>AI Answer:</strong>
 <p>{{ answer }}</p>
+</div>
 {% endif %}
+
+</div>
+
+</div>
 
 </body>
 </html>

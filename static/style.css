@@ -1,0 +1,119 @@
+body{
+font-family: 'Segoe UI', sans-serif;
+margin:0;
+background: linear-gradient(135deg,#667eea,#764ba2);
+min-height:100vh;
+display:flex;
+justify-content:center;
+align-items:center;
+transition:0.4s;
+}
+
+/* DARK MODE */
+
+body.dark{
+background:#121212;
+color:white;
+}
+
+/* CONTAINER */
+
+.container{
+width:800px;
+animation:fadeIn 1s ease;
+}
+
+h1{
+text-align:center;
+margin-bottom:30px;
+}
+
+/* CARD STYLE */
+
+.card{
+background:rgba(255,255,255,0.2);
+backdrop-filter:blur(10px);
+padding:25px;
+margin-bottom:20px;
+border-radius:15px;
+box-shadow:0 8px 25px rgba(0,0,0,0.2);
+transition:0.3s;
+}
+
+.card:hover{
+transform:translateY(-5px);
+}
+
+/* INPUT */
+
+input[type="text"]{
+width:70%;
+padding:12px;
+border-radius:8px;
+border:none;
+margin-right:10px;
+}
+
+/* BUTTON */
+
+button{
+padding:12px 18px;
+border:none;
+border-radius:8px;
+background:#4f46e5;
+color:white;
+cursor:pointer;
+transition:0.3s;
+}
+
+button:hover{
+background:#4338ca;
+transform:scale(1.05);
+}
+
+/* ANSWER BOX */
+
+.answer-box{
+margin-top:20px;
+padding:15px;
+border-radius:10px;
+background:rgba(255,255,255,0.4);
+animation:fadeIn 0.6s ease;
+}
+
+/* DARK MODE CARD */
+
+body.dark .card{
+background:#1e1e1e;
+}
+
+body.dark .answer-box{
+background:#2b2b2b;
+}
+
+/* THEME BUTTON */
+
+.theme-toggle{
+position:fixed;
+top:20px;
+right:20px;
+padding:10px 15px;
+background:black;
+color:white;
+border:none;
+border-radius:8px;
+cursor:pointer;
+}
+
+/* ANIMATION */
+
+@keyframes fadeIn{
+from{
+opacity:0;
+transform:translateY(20px);
+}
+to{
+opacity:1;
+transform:translateY(0);
+}
+}
