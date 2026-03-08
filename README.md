@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # GenAI RAG Document Assistant by Aman
 
 A Retrieval-Augmented Generation (RAG) application that allows users to upload PDF documents and ask questions about them.
