@@ -4,13 +4,80 @@
 <head>
 <title>GenAI RAG Assistant</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+<div class="page-title-row">
+<h1>GenAI RAG Assistant</h1>
+<button class="theme-toggle" id="theme-toggle" type="button">Toggle Theme</button>
+</div>
+
+<div class="app-shell">
+<aside class="sidebar card">
+<h3>Document Manager</h3>
+<p class="sidebar-subtitle">Indexed files: <span id="doc-count">{{ indexed_files|length }}</span></p>
+<ul id="doc-list" class="doc-list">
+{% if indexed_files %}
+{% for file in indexed_files %}
+<li>{{ file }}</li>
+{% endfor %}
+{% else %}
+<li class="doc-empty">No documents indexed</li>
+{% endif %}
+</ul>
+<button id="clear-index-btn" class="danger-btn" type="button">Clear Index</button>
+</aside>
+
+<main class="container">
+<div class="card upload-card">
+<h3>Upload Documents</h3>
+
+<form id="upload-form" method="POST" enctype="multipart/form-data">
+<div id="drop-zone" class="drop-zone">Drag and drop PDF files here</div>
+<div class="upload-controls">
+<input id="file-input" type="file" name="document" multiple>
+<span id="selected-files">No file chosen</span>
+<button type="submit">Upload</button>
+</div>
+</form>
+
+<p id="upload-message" class="status-line">{% if message %}{{ message }}{% endif %}</p>
+<p class="status-line"><strong>Currently indexed:</strong> <span id="indexed-files">{% if indexed_files %}{{ indexed_files | join(', ') }}{% else %}None{% endif %}</span></p>
+
+<div id="upload-progress-wrap" class="progress-wrap">
+<div id="upload-progress-bar" class="progress-bar"></div>
+</div>
+<p id="upload-progress-text" class="progress-text"></p>
+</div>
+
+<div class="card chat-card">
+<h3>Ask Question</h3>
+
+<form id="question-form" method="POST" class="question-form">
+<input id="question-input" type="text" name="question" placeholder="Ask something about the document..." required>
+<button id="ask-btn" type="submit">Ask</button>
+</form>
+
+<div id="timeline" class="timeline">
+{% for item in chat_history|reverse %}
+<div class="timeline-item user">
+<p>{{ item.question }}</p>
+</div>
+<div class="timeline-item ai">
+<p>{{ item.answer }}</p>
+{% if item.source %}
+<p class="source-line">Sources: {{ item.source }}</p>
+{% endif %}
+</div>
+{% endfor %}
+</div>
+</div>
+</main>
+</div>
 
 <script>
-function toggleTheme(){
-    document.body.classList.toggle("dark");
-}
-
 document.addEventListener("DOMContentLoaded", () => {
+    const themeToggle = document.getElementById("theme-toggle");
     const uploadForm = document.getElementById("upload-form");
     const fileInput = document.getElementById("file-input");
     const dropZone = document.getElementById("drop-zone");
@@ -20,56 +87,226 @@ document.addEventListener("DOMContentLoaded", () => {
     const progressWrap = document.getElementById("upload-progress-wrap");
     const progressBar = document.getElementById("upload-progress-bar");
     const progressText = document.getElementById("upload-progress-text");
+    const timeline = document.getElementById("timeline");
+    const questionForm = document.getElementById("question-form");
+    const questionInput = document.getElementById("question-input");
+    const askBtn = document.getElementById("ask-btn");
+    const clearIndexBtn = document.getElementById("clear-index-btn");
+    const docCount = document.getElementById("doc-count");
+    const docList = document.getElementById("doc-list");
 
     let selectedFiles = [];
+    let indexingInterval = null;
 
-    function setSelectedFiles(files){
+    function toggleTheme() {
+        document.body.classList.toggle("dark");
+    }
+
+    themeToggle.addEventListener("click", toggleTheme);
+
+    function setSelectedFiles(files) {
         selectedFiles = Array.from(files || []);
-        if (selectedFiles.length === 0){
+        if (selectedFiles.length === 0) {
             selectedFilesText.textContent = "No file chosen";
             return;
         }
-        selectedFilesText.textContent = selectedFiles.map(f => f.name).join(", ");
+        selectedFilesText.textContent = selectedFiles.map((f) => f.name).join(", ");
     }
 
-    function showProgress(percent){
+    function showUploadProgress(percent) {
         progressWrap.style.display = "block";
+        progressWrap.classList.remove("indeterminate");
         progressText.style.display = "block";
         progressBar.style.width = `${percent}%`;
         progressText.textContent = `${percent}%`;
     }
 
-    function hideProgress(){
-        progressWrap.style.display = "none";
-        progressText.style.display = "none";
-        progressBar.style.width = "0%";
-        progressText.textContent = "";
+    function startIndexingIndicator() {
+        if (indexingInterval) {
+            clearInterval(indexingInterval);
+        }
+        progressWrap.style.display = "block";
+        progressWrap.classList.add("indeterminate");
+        progressText.style.display = "block";
+        let dots = 0;
+        indexingInterval = setInterval(() => {
+            dots = (dots + 1) % 4;
+            progressText.textContent = `Indexing${".".repeat(dots)}`;
+        }, 400);
     }
 
-    hideProgress();
+    function stopProgress() {
+        if (indexingInterval) {
+            clearInterval(indexingInterval);
+            indexingInterval = null;
+        }
+        progressWrap.style.display = "none";
+        progressWrap.classList.remove("indeterminate");
+        progressText.style.display = "none";
+        progressText.textContent = "";
+        progressBar.style.width = "0%";
+    }
 
-    function uploadWithProgress(files){
-        if (!files || files.length === 0){
+    function updateDocManager(files) {
+        indexedFilesText.textContent = files.length ? files.join(", ") : "None";
+        docCount.textContent = String(files.length);
+        docList.innerHTML = "";
+        if (!files.length) {
+            const li = document.createElement("li");
+            li.className = "doc-empty";
+            li.textContent = "No documents indexed";
+            docList.appendChild(li);
+            return;
+        }
+        files.forEach((name) => {
+            const li = document.createElement("li");
+            li.textContent = name;
+            docList.appendChild(li);
+        });
+    }
+
+    function addBubble(text, type) {
+        const wrapper = document.createElement("div");
+        wrapper.className = `timeline-item ${type}`;
+        const p = document.createElement("p");
+        p.textContent = text;
+        wrapper.appendChild(p);
+        timeline.prepend(wrapper);
+        return wrapper;
+    }
+
+    function addTypingBubble() {
+        const wrapper = document.createElement("div");
+        wrapper.className = "timeline-item ai typing";
+        wrapper.innerHTML = "<span></span><span></span><span></span>";
+        timeline.prepend(wrapper);
+        return wrapper;
+    }
+
+    function addSourceLine(parent, source) {
+        if (!source) {
+            return;
+        }
+        const src = document.createElement("p");
+        src.className = "source-line";
+        src.textContent = `Sources: ${source}`;
+        parent.appendChild(src);
+    }
+
+    async function streamAnswer(question) {
+        const formData = new FormData();
+        formData.append("question", question);
+
+        const userBubble = addBubble(question, "user");
+        const typingBubble = addTypingBubble();
+        let aiBubble = null;
+        let aiTextNode = null;
+        let finalSource = "";
+
+        askBtn.disabled = true;
+        questionInput.disabled = true;
+
+        try {
+            const response = await fetch("/ask-stream", {
+                method: "POST",
+                body: formData
+            });
+
+            if (!response.ok || !response.body) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.message || "Unable to generate answer.");
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let answerText = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    break;
+                }
+
+                buffer += decoder.decode(value, { stream: true });
+                const events = buffer.split("\n\n");
+                buffer = events.pop() || "";
+
+                for (const evt of events) {
+                    if (!evt.startsWith("data: ")) {
+                        continue;
+                    }
+                    const raw = evt.slice(6).trim();
+                    if (!raw) {
+                        continue;
+                    }
+                    const payload = JSON.parse(raw);
+                    if (payload.type === "token") {
+                        if (!aiBubble) {
+                            typingBubble.remove();
+                            aiBubble = document.createElement("div");
+                            aiBubble.className = "timeline-item ai";
+                            aiTextNode = document.createElement("p");
+                            aiBubble.appendChild(aiTextNode);
+                            timeline.prepend(aiBubble);
+                        }
+                        answerText += payload.token;
+                        aiTextNode.textContent = answerText;
+                    } else if (payload.type === "done") {
+                        finalSource = payload.source || "";
+                    } else if (payload.type === "error") {
+                        throw new Error(payload.message || "Streaming failed.");
+                    }
+                }
+            }
+
+            if (!aiBubble) {
+                typingBubble.remove();
+                aiBubble = addBubble("No response generated.", "ai");
+            }
+            addSourceLine(aiBubble, finalSource);
+        } catch (err) {
+            typingBubble.remove();
+            addBubble(err.message || "Something went wrong while generating the answer.", "ai");
+        } finally {
+            askBtn.disabled = false;
+            questionInput.disabled = false;
+            questionInput.value = "";
+            questionInput.focus();
+            userBubble.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+    }
+
+    function uploadWithProgress(files) {
+        if (!files || files.length === 0) {
             uploadMessage.textContent = "Please choose at least one PDF before clicking Upload.";
             return;
         }
 
         const formData = new FormData();
         files.forEach((file) => formData.append("document", file));
-
-        showProgress(0);
-        uploadMessage.textContent = "Uploading and indexing...";
+        uploadMessage.textContent = "Uploading...";
+        showUploadProgress(0);
 
         const xhr = new XMLHttpRequest();
         xhr.open("POST", "/");
         xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
 
         xhr.upload.onprogress = (event) => {
-            if (!event.lengthComputable){
+            if (!event.lengthComputable) {
                 return;
             }
             const percent = Math.round((event.loaded / event.total) * 100);
-            showProgress(percent);
+            showUploadProgress(percent);
+        };
+
+        xhr.upload.onload = () => {
+            startIndexingIndicator();
+            uploadMessage.textContent = "Upload complete. Indexing documents...";
+        };
+
+        xhr.onloadstart = () => {
+            showUploadProgress(0);
         };
 
         xhr.onload = () => {
@@ -80,28 +317,39 @@ document.addEventListener("DOMContentLoaded", () => {
                 data = {};
             }
 
-            if (xhr.status >= 200 && xhr.status < 300 && data.ok){
-                uploadMessage.textContent = data.message || "Upload complete.";
-                indexedFilesText.textContent = (data.indexed_files || []).join(", ");
+            if (xhr.status >= 200 && xhr.status < 300 && data.ok) {
+                uploadMessage.textContent = data.message || "Indexing complete.";
+                updateDocManager(data.indexed_files || []);
                 selectedFiles = [];
                 fileInput.value = "";
                 selectedFilesText.textContent = "No file chosen";
-                showProgress(100);
                 setTimeout(() => {
-                    hideProgress();
+                    stopProgress();
                 }, 1200);
             } else {
                 uploadMessage.textContent = data.message || "Upload failed. Please try again.";
-                hideProgress();
+                stopProgress();
             }
         };
 
         xhr.onerror = () => {
             uploadMessage.textContent = "Network error during upload.";
-            hideProgress();
+            stopProgress();
         };
 
         xhr.send(formData);
+    }
+
+    async function clearIndex() {
+        const response = await fetch("/clear-index", { method: "POST" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) {
+            uploadMessage.textContent = data.message || "Could not clear index.";
+            return;
+        }
+        updateDocManager([]);
+        timeline.innerHTML = "";
+        uploadMessage.textContent = data.message || "Cleared indexed documents.";
     }
 
     fileInput.addEventListener("change", () => {
@@ -126,7 +374,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     dropZone.addEventListener("drop", (e) => {
         const droppedFiles = Array.from(e.dataTransfer.files || []);
-        if (droppedFiles.length === 0){
+        if (droppedFiles.length === 0) {
             return;
         }
         setSelectedFiles(droppedFiles);
@@ -136,68 +384,19 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         uploadWithProgress(selectedFiles);
     });
+
+    questionForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const question = questionInput.value.trim();
+        if (!question) {
+            return;
+        }
+        streamAnswer(question);
+    });
+
+    clearIndexBtn.addEventListener("click", clearIndex);
 });
 </script>
-
-</head>
-
-<body>
-
-<button class="theme-toggle" onclick="toggleTheme()">🌙 Toggle Mode</button>
-
-<div class="container">
-
-<h1>GenAI RAG Assistant 🤖</h1>
-
-<div class="card upload-card">
-<h3>Upload Document</h3>
-
-<form id="upload-form" method="POST" enctype="multipart/form-data">
-<div id="drop-zone" class="drop-zone">
-Drag and drop PDF files here
-</div>
-<div class="upload-controls">
-<input id="file-input" type="file" name="document" multiple>
-<span id="selected-files">No file chosen</span>
-<button type="submit">Upload</button>
-</div>
-</form>
-
-<p id="upload-message">{% if message %}{{ message }}{% endif %}</p>
-<p><strong>Currently indexed:</strong> <span id="indexed-files">{% if indexed_files %}{{ indexed_files | join(', ') }}{% else %}None{% endif %}</span></p>
-
-<div id="upload-progress-wrap" class="progress-wrap">
-<div id="upload-progress-bar" class="progress-bar"></div>
-</div>
-<p id="upload-progress-text" class="progress-text"></p>
-</div>
-
-<div class="card chat-card">
-
-<h3>Ask Question</h3>
-
-<form method="POST" class="question-form">
-<input type="text" name="question" placeholder="Ask something about the document..." required>
-<button type="submit">Ask</button>
-</form>
-
-{% if chat_history %}
-<div class="timeline">
-{% for item in chat_history|reverse %}
-<div class="timeline-item">
-<p><strong>You:</strong> {{ item.question }}</p>
-<p><strong>AI:</strong> {{ item.answer }}</p>
-{% if item.source %}
-<p class="source-line"><strong>Sources:</strong> {{ item.source }}</p>
-{% endif %}
-</div>
-{% endfor %}
-</div>
-{% endif %}
-
-</div>
-
-</div>
 
 </body>
 </html>

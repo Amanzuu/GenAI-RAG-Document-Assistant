@@ -2,6 +2,7 @@ from flask import Flask, jsonify, render_template, request
 import json
 import os
 from werkzeug.utils import secure_filename
+from flask_socketio import SocketIO, emit
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import CharacterTextSplitter
@@ -10,6 +11,7 @@ from langchain_community.llms import Ollama
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 UPLOAD_DIR = "uploads"
 VECTORSTORE_DIR = "vectorstore"
@@ -40,6 +42,45 @@ def load_persisted_state():
         with open(VECTORSTORE_META, "r", encoding="utf-8") as f:
             meta = json.load(f)
             indexed_files = meta.get("indexed_files", [])
+
+
+def build_prompt(context, question):
+    return f"""
+You are a helpful assistant.
+Answer using only the provided context.
+Use short paragraphs and simple wording.
+If the answer is missing in context, say so clearly.
+
+Context:
+{context}
+
+Question:
+{question}
+"""
+
+
+def get_retrieved_docs(question, k=3):
+    return vectorstore.similarity_search(question, k=k)
+
+
+def build_sources(docs):
+    sources = []
+    for doc in docs:
+        file = doc.metadata.get("source_file", "unknown")
+        page = doc.metadata.get("page", "?")
+        sources.append(f"{file} (Page {page})")
+    return ", ".join(sorted(set(sources)))
+
+
+def clear_vectorstore_files():
+    index_file = os.path.join(VECTORSTORE_DIR, "index.faiss")
+    store_file = os.path.join(VECTORSTORE_DIR, "index.pkl")
+    if os.path.exists(index_file):
+        os.remove(index_file)
+    if os.path.exists(store_file):
+        os.remove(store_file)
+    if os.path.exists(VECTORSTORE_META):
+        os.remove(VECTORSTORE_META)
 
 
 @app.route("/", methods=["GET","POST"])
@@ -141,31 +182,11 @@ def index():
                 )
 
             llm = Ollama(model="phi3")
-
-            docs = vectorstore.similarity_search(question, k=3)
-
+            docs = get_retrieved_docs(question, k=3)
             context = "\n".join([doc.page_content for doc in docs])
-
-            prompt = f"""
-Use the following context to answer the question.
-
-Context:
-{context}
-
-Question:
-{question}
-"""
-
+            prompt = build_prompt(context, question)
             answer = llm.invoke(prompt)
-
-            # SOURCE CITATION
-            sources = []
-            for doc in docs:
-                file = doc.metadata.get("source_file","unknown")
-                page = doc.metadata.get("page","?")
-                sources.append(f"{file} (Page {page})")
-
-            source = ", ".join(set(sources))
+            source = build_sources(docs)
             chat_history.append(
                 {
                     "question": question,
@@ -184,6 +205,57 @@ Question:
     )
 
 
+@socketio.on("ask_question")
+def handle_question(data):
+    global chat_history
+
+    if vectorstore is None:
+        emit("stream_error", {"message": "Upload PDF file(s) first, then ask a question."})
+        return
+
+    question = str(data.get("question", "")).strip()
+    if not question:
+        emit("stream_error", {"message": "Please type a question."})
+        return
+
+    try:
+        docs = get_retrieved_docs(question, k=3)
+        context = "\n".join([doc.page_content for doc in docs])
+        prompt = build_prompt(context, question)
+        source = build_sources(docs)
+        llm = Ollama(model="phi3")
+
+        answer_parts = []
+        for chunk in llm.stream(prompt):
+            token = str(chunk)
+            if not token:
+                continue
+            answer_parts.append(token)
+            emit("stream_response", {"word": token})
+
+        final_answer = "".join(answer_parts).strip()
+        chat_history.append(
+            {
+                "question": question,
+                "answer": final_answer,
+                "source": source
+            }
+        )
+        emit("stream_done", {"source": source})
+    except Exception as exc:
+        emit("stream_error", {"message": str(exc)})
+
+
+@app.route("/clear-index", methods=["POST"])
+def clear_index():
+    global vectorstore, indexed_files, chat_history
+    vectorstore = None
+    indexed_files = []
+    chat_history = []
+    clear_vectorstore_files()
+    return jsonify({"ok": True, "message": "Cleared indexed documents."})
+
+
 if __name__ == "__main__":
     load_persisted_state()
-    app.run(debug=True)
+    socketio.run(app, debug=True)
