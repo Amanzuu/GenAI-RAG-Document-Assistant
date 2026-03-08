@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
-.env
 uploads/
 vectorstore/
-.venv/
+.env
 venv/
+.venv/
