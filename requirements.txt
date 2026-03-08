@@ -1,0 +1,8 @@
+flask
+langchain
+langchain-community
+langchain-classic
+langchain-text-splitters
+faiss-cpu
+pypdf
+sentence-transformers

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<title>GenAI RAG Assistant</title>
+</head>
+
+<body>
+
+<h2>Upload PDF</h2>
+
+<form method="POST" enctype="multipart/form-data">
+<input type="file" name="document">
+<button type="submit">Upload</button>
+</form>
+
+{% if message %}
+<p>{{ message }}</p>
+{% endif %}
+
+{% if current_filename %}
+<p>Currently indexed PDF: <strong>{{ current_filename }}</strong></p>
+{% endif %}
+
+<hr>
+
+<h2>Ask Question</h2>
+
+<form method="POST">
+<input type="text" name="question" placeholder="Ask question">
+<button type="submit">Ask</button>
+</form>
+
+{% if answer %}
+<h3>Answer:</h3>
+<p>{{ answer }}</p>
+{% endif %}
+
+</body>
+</html>
