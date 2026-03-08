@@ -4,6 +4,7 @@
 <head>
 <title>GenAI RAG Assistant</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
 </head>
 
 <body>
@@ -77,6 +78,7 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", () => {
+    const socket = io();
     const themeToggle = document.getElementById("theme-toggle");
     const uploadForm = document.getElementById("upload-form");
     const fileInput = document.getElementById("file-input");
@@ -97,6 +99,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let selectedFiles = [];
     let indexingInterval = null;
+    let currentTypingBubble = null;
+    let currentAiBubble = null;
+    let currentAiTextNode = null;
 
     function toggleTheme() {
         document.body.classList.toggle("dark");
@@ -193,89 +198,68 @@ document.addEventListener("DOMContentLoaded", () => {
         parent.appendChild(src);
     }
 
-    async function streamAnswer(question) {
-        const formData = new FormData();
-        formData.append("question", question);
-
-        const userBubble = addBubble(question, "user");
-        const typingBubble = addTypingBubble();
-        let aiBubble = null;
-        let aiTextNode = null;
-        let finalSource = "";
-
+    function disableQuestionInput() {
         askBtn.disabled = true;
         questionInput.disabled = true;
-
-        try {
-            const response = await fetch("/ask-stream", {
-                method: "POST",
-                body: formData
-            });
-
-            if (!response.ok || !response.body) {
-                const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.message || "Unable to generate answer.");
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
-            let answerText = "";
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) {
-                    break;
-                }
-
-                buffer += decoder.decode(value, { stream: true });
-                const events = buffer.split("\n\n");
-                buffer = events.pop() || "";
-
-                for (const evt of events) {
-                    if (!evt.startsWith("data: ")) {
-                        continue;
-                    }
-                    const raw = evt.slice(6).trim();
-                    if (!raw) {
-                        continue;
-                    }
-                    const payload = JSON.parse(raw);
-                    if (payload.type === "token") {
-                        if (!aiBubble) {
-                            typingBubble.remove();
-                            aiBubble = document.createElement("div");
-                            aiBubble.className = "timeline-item ai";
-                            aiTextNode = document.createElement("p");
-                            aiBubble.appendChild(aiTextNode);
-                            timeline.prepend(aiBubble);
-                        }
-                        answerText += payload.token;
-                        aiTextNode.textContent = answerText;
-                    } else if (payload.type === "done") {
-                        finalSource = payload.source || "";
-                    } else if (payload.type === "error") {
-                        throw new Error(payload.message || "Streaming failed.");
-                    }
-                }
-            }
-
-            if (!aiBubble) {
-                typingBubble.remove();
-                aiBubble = addBubble("No response generated.", "ai");
-            }
-            addSourceLine(aiBubble, finalSource);
-        } catch (err) {
-            typingBubble.remove();
-            addBubble(err.message || "Something went wrong while generating the answer.", "ai");
-        } finally {
-            askBtn.disabled = false;
-            questionInput.disabled = false;
-            questionInput.value = "";
-            questionInput.focus();
-            userBubble.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        }
     }
+
+    function enableQuestionInput() {
+        askBtn.disabled = false;
+        questionInput.disabled = false;
+        questionInput.value = "";
+        questionInput.focus();
+    }
+
+    function startStreamingQuestion(question) {
+        addBubble(question, "user");
+        currentTypingBubble = addTypingBubble();
+        currentAiBubble = null;
+        currentAiTextNode = null;
+        disableQuestionInput();
+        socket.emit("ask_question", { question: question });
+    }
+
+    socket.on("stream_response", (payload) => {
+        const word = (payload && payload.word) ? payload.word : "";
+        if (!word) {
+            return;
+        }
+        if (!currentAiBubble) {
+            if (currentTypingBubble) {
+                currentTypingBubble.remove();
+                currentTypingBubble = null;
+            }
+            currentAiBubble = document.createElement("div");
+            currentAiBubble.className = "timeline-item ai";
+            currentAiTextNode = document.createElement("p");
+            currentAiBubble.appendChild(currentAiTextNode);
+            timeline.prepend(currentAiBubble);
+        }
+        currentAiTextNode.textContent += word;
+    });
+
+    socket.on("stream_done", (payload) => {
+        if (currentTypingBubble) {
+            currentTypingBubble.remove();
+            currentTypingBubble = null;
+        }
+        if (!currentAiBubble) {
+            currentAiBubble = addBubble("No response generated.", "ai");
+        }
+        addSourceLine(currentAiBubble, payload && payload.source ? payload.source : "");
+        currentAiBubble.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        enableQuestionInput();
+    });
+
+    socket.on("stream_error", (payload) => {
+        if (currentTypingBubble) {
+            currentTypingBubble.remove();
+            currentTypingBubble = null;
+        }
+        const message = payload && payload.message ? payload.message : "Something went wrong while generating the answer.";
+        addBubble(message, "ai");
+        enableQuestionInput();
+    });
 
     function uploadWithProgress(files) {
         if (!files || files.length === 0) {
@@ -391,7 +375,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!question) {
             return;
         }
-        streamAnswer(question);
+        startStreamingQuestion(question);
     });
 
     clearIndexBtn.addEventListener("click", clearIndex);
