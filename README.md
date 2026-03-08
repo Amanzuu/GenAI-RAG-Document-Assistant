@@ -12,7 +12,7 @@ The system processes documents, converts them into embeddings, stores them in a 
 * Local LLM inference using Ollama
 * Vector search with FAISS
 
-## 🚀 Demo
+## 🚀 Screenshot
 
 ![GenAI RAG Assistant](ui-preview.png)
 
